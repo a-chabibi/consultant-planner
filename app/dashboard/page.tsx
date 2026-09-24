@@ -1,4 +1,3 @@
-
 "use client";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -16,9 +15,12 @@ export default function Dashboard(){
   const [selectedDate,setSelectedDate]=useState<string|null>(null);
   const [showForm,setShowForm]=useState(false);
   const [editing,setEditing]=useState<Schedule|null>(null);
-  const [conflictWarning,setConflictWarning]=useState<any>(null);
+  const [conflictWarning,setConflictWarning]=useState<{conflicts: any[], dates: string[]} | null>(null);
   const [form,setForm]=useState({ client_name:"", project_name:"", location:"WFO" as any, task_description:"", start_time:"09:00", end_time:"17:00" });
   const [userEmail,setUserEmail]=useState("");
+  const [isSaving,setIsSaving]=useState(false);
+  const [repeatCount,setRepeatCount]=useState(1);
+  const [skipWeekend,setSkipWeekend]=useState(true);
 
   const load = async ()=>{
     const { data:{ user } } = await supabase.auth.getUser();
@@ -31,36 +33,80 @@ export default function Dashboard(){
   };
   useEffect(()=>{ load(); }, [currentMonth]);
 
-  const checkConflict = async (date:string, excludeId?:string)=>{
-    const res = await fetch("/api/schedules/conflict-check", { method:"POST", body: JSON.stringify({ date, excludeId }) });
-    const json = await res.json();
-    return json;
+  const generateRecurringDates = (startStr: string, count: number, skipWeekend: boolean) => {
+    const dates: string[] = [];
+    let curr = new Date(startStr + "T00:00:00");
+    let added = 0;
+    while(added < count){
+      const day = curr.getDay();
+      if(skipWeekend && (day === 0 || day === 6)){
+        curr.setDate(curr.getDate() + 1);
+        continue;
+      }
+      dates.push(curr.toISOString().slice(0,10));
+      curr.setDate(curr.getDate() + 1);
+      added++;
+    }
+    return dates;
+  };
+
+  const checkConflict = async (dates: string[], excludeId?:string)=>{
+    const { data:{ user } } = await supabase.auth.getUser();
+    if(!user) return { hasConflict: false, conflicts: [] };
+    let query = supabase.from("schedules").select("*").eq("consultant_id", user.id).in("date", dates).neq("status", "REJECTED");
+    if(excludeId) query = query.neq("id", excludeId);
+    const { data } = await query;
+    return { hasConflict: (data && data.length > 0), conflicts: data || [] };
   };
 
   const handleSave = async (force=false)=>{
     if(!selectedDate) return;
-    const { data:{ user } } = await supabase.auth.getUser();
-    if(!user) return;
-    if(!force){
-      const c = await checkConflict(selectedDate, editing?.id);
-      if(c.hasConflict){
-        setConflictWarning(c); return;
+    if(isSaving) return;
+    setIsSaving(true);
+    try{
+      const { data:{ user } } = await supabase.auth.getUser();
+      if(!user) return;
+
+      const datesToSave = editing? [selectedDate] : generateRecurringDates(selectedDate, repeatCount, skipWeekend);
+
+      if(!force){
+        const c = await checkConflict(datesToSave, editing?.id);
+        if(c.hasConflict){
+          setConflictWarning({ conflicts: c.conflicts, dates: datesToSave });
+          return;
+        }
       }
+
+      if(editing){
+        const payload = { consultant_id:user.id, date:selectedDate,...form, status: editing?.status==="REJECTED"? "PENDING" : (editing?.status || "PENDING") };
+        await supabase.from("schedules").update(payload).eq("id", editing.id);
+      }else{
+        const payloads = datesToSave.map(d => ({
+          consultant_id: user.id,
+          date: d,
+         ...form,
+          status: "PENDING" as const
+        }));
+        // INSERT SEKALI AJA, BUKAN PER-LOOP -> ANTI DOBEL
+        const { error } = await supabase.from("schedules").insert(payloads);
+        if(error) throw error;
+      }
+
+      setShowForm(false); setEditing(null); setConflictWarning(null); setRepeatCount(1);
+      await load();
+    } catch(e:any){
+      alert("Gagal simpan: " + e.message);
+    } finally {
+      setIsSaving(false);
     }
-    const payload = { consultant_id:user.id, date:selectedDate, ...form, status: editing?.status==="REJECTED" ? "PENDING" : (editing?.status || "PENDING") };
-    if(editing){
-      await supabase.from("schedules").update(payload).eq("id", editing.id);
-    }else{
-      await supabase.from("schedules").insert(payload);
-    }
-    setShowForm(false); setEditing(null); setConflictWarning(null); load();
   };
 
   const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth()+1, 0).getDate();
-const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
-const emptyDays = Array(firstDay).fill(null) as (number | null)[];
-const monthDays = Array.from({length: daysInMonth}, (_, i) => i+1) as (number | null)[];
-const days = [...emptyDays, ...monthDays];
+  const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
+  const emptyDays = Array(firstDay).fill(null) as (number | null)[];
+  const monthDays = Array.from({length: daysInMonth}, (_, i) => i+1) as (number | null)[];
+  const days = [...emptyDays,...monthDays];
+
   const getForDate = (d:number)=>{
     const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth()+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
     return schedules.filter(s=>s.date===dateStr);
@@ -74,7 +120,7 @@ const days = [...emptyDays, ...monthDays];
           <button onClick={async()=>{ await supabase.auth.signOut(); location.href="/login"; }} className="px-4 py-2 bg-white border rounded-xl">Logout</button>
         </div>
 
-        <div className="bg-white rounded-[24px] border shadow-sm p-6">
+        <div className="bg-white rounded- border shadow-sm p-6">
           <div className="flex justify-between items-center mb-4">
             <button onClick={()=>setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth()-1,1))} className="px-3 py-2 border rounded-xl">← Prev</button>
             <h2 className="font-semibold">{currentMonth.toLocaleDateString("id-ID",{month:"long",year:"numeric"})}</h2>
@@ -88,11 +134,11 @@ const days = [...emptyDays, ...monthDays];
               const isConflict = list.filter(s=>s.status!=="REJECTED").length>1;
               const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth()+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
               return (
-                <div key={idx} onClick={()=>{ setSelectedDate(dateStr); setForm({ client_name:"", project_name:"", location:"WFO" as any, task_description:"", start_time:"09:00", end_time:"17:00"}); setEditing(null); setShowForm(true); }}
-                  className={`min-h-[90px] p-2 rounded-2xl border cursor-pointer hover:bg-zinc-50 ${isConflict?"bg-red-50 border-red-300":"bg-white"}`}>
-                  <div className="flex justify-between"><span className="font-medium">{d}</span>{isConflict && <span>⚠️</span>}</div>
+                <div key={idx} onClick={()=>{ setSelectedDate(dateStr); setForm({ client_name:"", project_name:"", location:"WFO" as any, task_description:"", start_time:"09:00", end_time:"17:00"}); setEditing(null); setRepeatCount(1); setShowForm(true); }}
+                  className={`min-h- p-2 rounded-2xl border cursor-pointer hover:bg-zinc-50 ${isConflict?"bg-red-50 border-red-300":"bg-white"}`}>
+                  <div className="flex justify-between"><span className="font-medium">{d}</span>{isConflict && <span>⚠</span>}</div>
                   <div className="mt-1 space-y-1">
-                    {list.slice(0,3).map(s=><div key={s.id} className={`text-[10px] px-1.5 py-0.5 rounded-full truncate ${s.status==="PENDING"?"bg-yellow-100 text-yellow-800":s.status==="APPROVED"?"bg-green-100 text-green-800":"bg-red-100 text-red-800"}`}>{s.client_name}</div>)}
+                    {list.slice(0,3).map(s=><div key={s.id} className={`text- px-1.5 py-0.5 rounded-full truncate ${s.status==="PENDING"?"bg-yellow-100 text-yellow-800":s.status==="APPROVED"?"bg-green-100 text-green-800":"bg-red-100 text-red-800"}`}>{s.client_name}</div>)}
                   </div>
                 </div>
               );
@@ -100,13 +146,13 @@ const days = [...emptyDays, ...monthDays];
           </div>
         </div>
 
-        <div className="mt-6 bg-white rounded-[24px] border p-6">
+        <div className="mt-6 bg-white rounded- border p-6">
           <h3 className="font-semibold mb-4">Jadwal Saya Bulan Ini</h3>
           <div className="space-y-3">
             {schedules.map(s=>(
               <div key={s.id} className="flex justify-between items-center p-4 border rounded-2xl">
                 <div>
-                  <div className="font-medium">{s.client_name} - {s.project_name} <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full ${s.status==="PENDING"?"bg-yellow-100 text-yellow-800":s.status==="APPROVED"?"bg-green-100 text-green-800":"bg-red-100 text-red-800"}`}>{s.status}</span></div>
+                  <div className="font-medium">{s.client_name} - {s.project_name} <span className={`ml-2 text- px-2 py-0.5 rounded-full ${s.status==="PENDING"?"bg-yellow-100 text-yellow-800":s.status==="APPROVED"?"bg-green-100 text-green-800":"bg-red-100 text-red-800"}`}>{s.status}</span></div>
                   <div className="text-xs text-zinc-500">{s.date} {s.start_time}-{s.end_time} • {s.location} • {s.task_description}</div>
                   {s.rejection_reason && <div className="text-xs text-red-600 mt-1">Alasan ditolak: {s.rejection_reason}</div>}
                 </div>
@@ -125,7 +171,7 @@ const days = [...emptyDays, ...monthDays];
 
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-[24px] w-full max-w-lg p-6">
+          <div className="bg-white rounded- w-full max-w-lg p-6 max-h- overflow-auto">
             <h3 className="font-bold text-lg">{editing?"Edit":"Tambah"} Jadwal - {selectedDate}</h3>
             <div className="mt-4 space-y-3">
               <input value={form.client_name} onChange={e=>setForm({...form, client_name:e.target.value})} placeholder="Nama Client" className="w-full border rounded-xl px-4 py-3"/>
@@ -133,20 +179,49 @@ const days = [...emptyDays, ...monthDays];
               <select value={form.location} onChange={e=>setForm({...form, location:e.target.value as any})} className="w-full border rounded-xl px-4 py-3"><option>WFO</option><option>WFH</option><option>On-site</option><option>Leave</option></select>
               <textarea value={form.task_description} onChange={e=>setForm({...form, task_description:e.target.value})} placeholder="Deskripsi tugas" className="w-full border rounded-xl px-4 py-3"/>
               <div className="flex gap-3"><input type="time" value={form.start_time} onChange={e=>setForm({...form, start_time:e.target.value})} className="flex-1 border rounded-xl px-4 py-3"/><input type="time" value={form.end_time} onChange={e=>setForm({...form, end_time:e.target.value})} className="flex-1 border rounded-xl px-4 py-3"/></div>
+
+              {!editing && (
+                <div className="bg-zinc-50 border rounded-2xl p-4 space-y-3">
+                  <div className="font-semibold text-sm">Opsi Berulang (Recurring)</div>
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm">Berapa hari?</label>
+                    <input type="number" min={1} max={30} value={repeatCount} onChange={e=>setRepeatCount(Math.max(1, parseInt(e.target.value)||1))} className="w-20 border rounded-xl px-3 py-2"/>
+                    <span className="text-xs text-zinc-500">hari berurutan</span>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={skipWeekend} onChange={e=>setSkipWeekend(e.target.checked)} /> Lewati Sabtu-Minggu
+                  </label>
+                  {repeatCount > 1 && selectedDate && (
+                    <div className="text-xs text-zinc-600">
+                      Akan dibuat untuk: <b>{generateRecurringDates(selectedDate, repeatCount, skipWeekend).join(", ")}</b>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="flex gap-3 mt-6"><button onClick={()=>setShowForm(false)} className="flex-1 border py-3 rounded-xl">Batal</button><button onClick={()=>handleSave()} className="flex-1 bg-zinc-900 text-white py-3 rounded-xl">Simpan</button></div>
+            <div className="flex gap-3 mt-6">
+              <button disabled={isSaving} onClick={()=>setShowForm(false)} className="flex-1 border py-3 rounded-xl disabled:opacity-50">Batal</button>
+              <button disabled={isSaving} onClick={()=>handleSave()} className="flex-1 bg-zinc-900 text-white py-3 rounded-xl disabled:opacity-50">
+                {isSaving? "Menyimpan..." : (editing? "Update" : (repeatCount>1? `Simpan ${repeatCount} Hari` : "Simpan"))}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {conflictWarning && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-[24px] w-full max-w-md p-6 border-2 border-red-200">
-            <h3 className="font-bold text-red-600">⚠️ Bentrok Terdeteksi!</h3>
+          <div className="bg-white rounded- w-full max-w-md p-6 border-2 border-red-200">
+            <h3 className="font-bold text-red-600">⚠ Bentrok Terdeteksi!</h3>
             <p className="text-sm mt-2">Kamu sudah ada jadwal di tanggal ini:</p>
-            <div className="mt-3 space-y-2">{conflictWarning.conflicts.map((c:any)=><div key={c.id} className="p-2 bg-red-50 rounded-xl text-xs">{c.client_name} jam {c.start_time}-{c.end_time}</div>)}</div>
-            <p className="text-sm mt-3 font-medium">Yakin mau double booking?</p>
-            <div className="flex gap-3 mt-5"><button onClick={()=>setConflictWarning(null)} className="flex-1 border py-3 rounded-xl">Batal</button><button onClick={()=>{ setConflictWarning(null); handleSave(true); }} className="flex-1 bg-red-600 text-white py-3 rounded-xl">Tetap Simpan</button></div>
+            <div className="mt-3 space-y-2 max-h-40 overflow-auto">
+              {conflictWarning.conflicts.map((c:any)=><div key={c.id} className="p-2 bg-red-50 rounded-xl text-xs">{c.date} - {c.client_name} jam {c.start_time}-{c.end_time}</div>)}
+            </div>
+            <p className="text-sm mt-3 font-medium">Yakin mau double booking untuk {conflictWarning.dates.length} hari ini?</p>
+            <div className="flex gap-3 mt-5">
+              <button disabled={isSaving} onClick={()=>setConflictWarning(null)} className="flex-1 border py-3 rounded-xl">Batal</button>
+              <button disabled={isSaving} onClick={()=>{ setConflictWarning(null); handleSave(true); }} className="flex-1 bg-red-600 text-white py-3 rounded-xl">{isSaving?"Menyimpan...":"Tetap Simpan"}</button>
+            </div>
           </div>
         </div>
       )}
