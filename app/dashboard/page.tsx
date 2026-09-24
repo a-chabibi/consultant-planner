@@ -58,8 +58,9 @@ export default function Dashboard(){
 
   const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth()+1, 0).getDate();
 const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
-const days: (number | null)[] = [...Array(firstDay).fill(null), ...Array.from({length:daysInMonth}, (_,i)=> i+1)];
-
+const emptyDays = Array(firstDay).fill(null) as (number | null)[];
+const monthDays = Array.from({length: daysInMonth}, (_, i) => i+1) as (number | null)[];
+const days = [...emptyDays, ...monthDays];
   const getForDate = (d:number)=>{
     const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth()+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
     return schedules.filter(s=>s.date===dateStr);
