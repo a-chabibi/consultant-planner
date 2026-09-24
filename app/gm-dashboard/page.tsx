@@ -18,8 +18,23 @@ export default function GMDashboard(){
     const d = new Date(dateStr + "T00:00:00");
     return d.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   };
-
   const getInitials = (email:string) => email? email.slice(0,2).toUpperCase() : "??";
+
+  // --- FIX LOGIKA BENTROK ---
+  const timeToMin = (t:string) => {
+    if(!t) return 0;
+    const [h,m] = t.split(":").map(Number);
+    return h*60 + (m||0);
+  };
+  const isOverlapping = (a:any, b:any) => {
+    if(a.id===b.id) return false;
+    if(a.consultant_id!==b.consultant_id) return false;
+    if(a.date!==b.date) return false;
+    if(a.status==="REJECTED" || b.status==="REJECTED") return false;
+    const sA = timeToMin(a.start_time), eA = timeToMin(a.end_time);
+    const sB = timeToMin(b.start_time), eB = timeToMin(b.end_time);
+    return sA < eB && sB < eA; // ini baru bentrok beneran
+  };
 
   const load = async ()=>{
     const { data: prof } = await supabase.from("profiles").select("*");
@@ -31,7 +46,19 @@ export default function GMDashboard(){
 
   const pending = schedules.filter(s=>s.status==="PENDING");
   const approved = schedules.filter(s=>s.status==="APPROVED");
-  const conflicts = (()=>{ const map:any={}; schedules.forEach(s=>{ if(s.status==="REJECTED") return; const key=s.consultant_id+"_"+s.date; map[key]=(map[key]||0)+1; }); return Object.values(map).filter((v:any)=>v>1).length; })();
+
+  // hitung bentrok yang jamnya beneran tabrakan
+  const conflictsList = (()=> {
+    const pairs:any[] = [];
+    for(let i=0;i<schedules.length;i++){
+      for(let j=i+1;j<schedules.length;j++){
+        if(isOverlapping(schedules[i], schedules[j])) pairs.push([schedules[i], schedules[j]]);
+      }
+    }
+    return pairs;
+  })();
+  const conflicts = conflictsList.length;
+  const conflictIds = new Set(conflictsList.flat().map((s:any)=>s.id));
 
   const filtered = schedules.filter(s=>{
     if(tab==="pending" && s.status!=="PENDING") return false;
@@ -76,7 +103,6 @@ export default function GMDashboard(){
   return (
     <div className="min-h-screen bg-[#fcfbf8] p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
-        {/* HEADER */}
         <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">GM Dashboard</h1>
@@ -88,36 +114,34 @@ export default function GMDashboard(){
           </div>
         </div>
 
-        {/* STATS CARDS - MODERN */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-[#fef3c7] p-6 rounded-[24px] border border-amber-200 relative overflow-hidden">
+          <div className="bg-[#fef3c7] p-6 rounded- border border-amber-200 relative overflow-hidden">
             <div className="w-10 h-10 bg-amber-300 rounded-full flex items-center justify-center text-lg">🔔</div>
             <div className="mt-4 text-xs text-amber-800 font-medium">Butuh Approval</div>
             <div className="text-4xl font-bold mt-1">{pending.length}</div>
             <div className="text-xs text-amber-700/70 mt-1">Menunggu persetujuan</div>
           </div>
-          <div className="bg-white p-6 rounded-[24px] border shadow-sm">
+          <div className="bg-white p-6 rounded- border shadow-sm">
             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-lg">📅</div>
             <div className="mt-4 text-xs text-zinc-500 font-medium">Jadwal Bulan Ini</div>
             <div className="text-4xl font-bold mt-1">{schedules.length}</div>
             <div className="text-xs text-emerald-600 mt-1">+{schedules.length} total</div>
           </div>
-          <div className="bg-white p-6 rounded-[24px] border shadow-sm">
+          <div className="bg-white p-6 rounded- border shadow-sm">
             <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-lg">✓</div>
             <div className="mt-4 text-xs text-zinc-500 font-medium">Selesai</div>
             <div className="text-4xl font-bold mt-1">{approved.length}</div>
             <div className="text-xs text-zinc-400 mt-1">Bulan ini</div>
           </div>
-          <div className="bg-[#fecaca] p-6 rounded-[24px] border border-red-200 relative overflow-hidden">
+          <div className={`p-6 rounded- border relative overflow-hidden ${conflicts>0? "bg-[#fecaca] border-red-200" : "bg-white"}`}>
             <div className="w-10 h-10 bg-red-400 text-white rounded-full flex items-center justify-center text-lg">⚠</div>
-            <div className="mt-4 text-xs text-red-800 font-medium">Bentrok Terdeteksi</div>
+            <div className="mt-4 text-xs font-medium">Bentrok Terdeteksi</div>
             <div className="text-4xl font-bold mt-1">{conflicts}</div>
-            <div className="text-xs text-red-700/70 mt-1">Perlu dicek</div>
+            <div className="text-xs mt-1">{conflicts>0? "Perlu dicek - jam tumpang tindih" : "Aman - tidak ada tabrakan jam"}</div>
           </div>
         </div>
 
-        {/* TABLE CARD */}
-        <div className="bg-white rounded-[24px] border shadow-sm p-6">
+        <div className="bg-white rounded- border shadow-sm p-6">
           <div className="flex flex-col lg:flex-row justify-between gap-4 mb-6">
             <div className="flex gap-2">
               <button onClick={()=>setTab("pending")} className={`px-5 py-2.5 rounded-2xl text-sm font-medium transition ${tab==="pending"?"bg-zinc-900 text-white shadow":"bg-zinc-100 text-zinc-600 hover:bg-zinc-200"}`}>Butuh Approval ({pending.length})</button>
@@ -142,24 +166,26 @@ export default function GMDashboard(){
 
           <div className="overflow-x-auto rounded-2xl border">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-50 text-[11px] uppercase tracking-wider text-zinc-500"><tr><th className="text-left py-3 px-4 font-semibold">Tanggal</th><th className="text-left py-3 px-4 font-semibold">Konsultan</th><th className="text-left py-3 px-4 font-semibold">Client</th><th className="text-left py-3 px-4 font-semibold">Project</th><th className="text-left py-3 px-4 font-semibold">Jam</th><th className="text-left py-3 px-4 font-semibold">Status</th><th className="text-left py-3 px-4 font-semibold">Aksi</th></tr></thead>
+              <thead className="bg-zinc-50 text- uppercase tracking-wider text-zinc-500"><tr><th className="text-left py-3 px-4 font-semibold">Tanggal</th><th className="text-left py-3 px-4 font-semibold">Konsultan</th><th className="text-left py-3 px-4 font-semibold">Client</th><th className="text-left py-3 px-4 font-semibold">Project</th><th className="text-left py-3 px-4 font-semibold">Jam</th><th className="text-left py-3 px-4 font-semibold">Status</th><th className="text-left py-3 px-4 font-semibold">Aksi</th></tr></thead>
               <tbody>
-                {filtered.map(s=>(
-                  <tr key={s.id} className="border-t hover:bg-zinc-50/70 transition">
-                    <td className="py-4 px-4 min-w-[210px]">
-                      <div className="font-semibold text-zinc-900">{formatTanggalHari(s.date)}</div>
-                      <div className="text-[11px] text-zinc-400 mt-0.5">{s.date}</div>
+                {filtered.map(s=>{
+                  const isConflict = conflictIds.has(s.id);
+                  return (
+                  <tr key={s.id} className={`border-t hover:bg-zinc-50/70 transition ${isConflict?"bg-red-50":""}`}>
+                    <td className="py-4 px-4 min-w-">
+                      <div className="font-semibold text-zinc-900">{formatTanggalHari(s.date)} {isConflict && <span className="text- bg-red-500 text-white px-1.5 py-0.5 rounded-full">BENTROK</span>}</div>
+                      <div className="text- text-zinc-400 mt-0.5">{s.date}</div>
                     </td>
                     <td className="py-4 px-4">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-zinc-900 text-white flex items-center justify-center text-[10px] font-bold">{getInitials(s.profiles?.email)}</div>
-                        <span className="text-xs truncate max-w-[140px]">{s.profiles?.email}</span>
+                        <div className="w-7 h-7 rounded-full bg-zinc-900 text-white flex items-center justify-center text- font-bold">{getInitials(s.profiles?.email)}</div>
+                        <span className="text-xs truncate max-w-">{s.profiles?.email}</span>
                       </div>
                     </td>
                     <td className="py-4 px-4 font-medium">{s.client_name}</td>
                     <td className="py-4 px-4 text-zinc-600">{s.project_name}</td>
-                    <td className="py-4 px-4"><span className="text-xs">{s.start_time}-{s.end_time}</span><span className="ml-2 text-[10px] px-2 py-0.5 bg-zinc-100 rounded-full">{s.location}</span></td>
-                    <td className="py-4 px-4"><span className={`px-2.5 py-1 rounded-full text-[11px] font-medium ${s.status==="PENDING"?"bg-yellow-100 text-yellow-800":s.status==="APPROVED"?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-700"}`}>{s.status}</span></td>
+                    <td className="py-4 px-4"><span className="text-xs">{s.start_time}-{s.end_time}</span><span className="ml-2 text- px-2 py-0.5 bg-zinc-100 rounded-full">{s.location}</span></td>
+                    <td className="py-4 px-4"><span className={`px-2.5 py-1 rounded-full text- font-medium ${s.status==="PENDING"?"bg-yellow-100 text-yellow-800":s.status==="APPROVED"?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-700"}`}>{s.status}</span></td>
                     <td className="py-4 px-4">
                       <div className="flex gap-1.5">
                         <button disabled={approving===s.id} onClick={()=>handleApprove(s.id)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">Approve</button>
@@ -167,7 +193,8 @@ export default function GMDashboard(){
                       </div>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
                 {filtered.length===0 && <tr><td colSpan={7} className="py-16 text-center text-zinc-400">Gak ada jadwal yang cocok filter</td></tr>}
               </tbody>
             </table>
