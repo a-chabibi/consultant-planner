@@ -57,8 +57,8 @@ export default function Dashboard(){
   };
 
   const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth()+1, 0).getDate();
-  const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
-  const days = Array.from({length:firstDay}).map(()=>null).concat(Array.from({length:daysInMonth}).map((_,i)=>i+1));
+const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
+const days: (number | null)[] = [...Array(firstDay).fill(null), ...Array.from({length:daysInMonth}, (_,i)=> i+1)];
 
   const getForDate = (d:number)=>{
     const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth()+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
