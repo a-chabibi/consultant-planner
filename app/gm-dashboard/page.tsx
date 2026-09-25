@@ -13,39 +13,6 @@ export default function GMDashboard(){
   const [search,setSearch]=useState("");
   const [selectedCard,setSelectedCard]=useState<null | { type: "pending"|"total"|"approved"|"conflict", title: string }>(null);
 
-  // Ubah password konsultan (oleh GM)
-  const [pwTarget,setPwTarget]=useState<null | { id:string; email:string }>(null);
-  const [pwValue,setPwValue]=useState("");
-  const [pwBusy,setPwBusy]=useState(false);
-  const [pwMsg,setPwMsg]=useState<{ ok:boolean; text:string } | null>(null);
-
-  const openPwModal = (id:string, email:string) => { setPwTarget({ id, email }); setPwValue(""); setPwMsg(null); };
-  const closePwModal = () => { setPwTarget(null); setPwValue(""); setPwMsg(null); };
-
-  const submitPassword = async () => {
-    if(!pwTarget) return;
-    if(pwValue.length < 6){ setPwMsg({ ok:false, text:"Password minimal 6 karakter" }); return; }
-    setPwBusy(true); setPwMsg(null);
-    try{
-      const res = await fetch("/api/users/update-password", {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ userId: pwTarget.id, password: pwValue }),
-      });
-      const json = await res.json().catch(()=>({}));
-      if(res.ok){
-        setPwMsg({ ok:true, text:`Password ${pwTarget.email} berhasil diubah` });
-        setPwValue("");
-      } else {
-        setPwMsg({ ok:false, text: json.error || "Gagal mengubah password" });
-      }
-    } catch {
-      setPwMsg({ ok:false, text:"Terjadi kesalahan jaringan" });
-    } finally {
-      setPwBusy(false);
-    }
-  };
-
   const formatTanggalHari = (d: string) => {
     if(!d) return "-";
     return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -94,7 +61,6 @@ export default function GMDashboard(){
   conflictsList.forEach(pair => pair.forEach(s => conflictIds.add(s.id)));
   const conflictsCount = conflictsList.length;
 
-  // FIX: type yang bener biar gak error ReactNode
   const perKonsultan: [string, number][] = (()=> {
     const map: Record<string, number> = {};
     schedules.forEach(s=>{
@@ -207,44 +173,6 @@ export default function GMDashboard(){
           </div>
         </div>
 
-        <div className="bg-white/90 backdrop-blur-xl rounded- border border-emerald-100 shadow-sm p-6 mb-8">
-          <div className="flex justify-between items-start mb-6">
-            <div>
-              <h2 className="text-xl font-bold text-emerald-950">👥 Manajemen Konsultan</h2>
-              <p className="text-sm text-emerald-700/50 mt-1">Ubah password akun konsultan. Password baru minimal 6 karakter.</p>
-            </div>
-            <span className="text-xs px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full">{profiles.filter(p=>p.role==="CONSULTANT").length} konsultan</span>
-          </div>
-          <div className="overflow-x-auto rounded-2xl border border-emerald-50">
-            <table className="w-full text-sm">
-              <thead className="bg-emerald-50/50 text- uppercase tracking-wider text-emerald-800/60">
-                <tr><th className="text-left py-3 px-4">Email</th><th className="text-left py-3 px-4">Role</th><th className="text-right py-3 px-4">Aksi</th></tr>
-              </thead>
-              <tbody>
-                {profiles.map((p:any)=>(
-                  <tr key={p.id} className="border-t border-emerald-50 hover:bg-emerald-50/50">
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-emerald-900 text-white flex items-center justify-center text- font-bold">{p.email?.slice(0,2).toUpperCase()}</div>
-                        <span className="text-xs">{p.email}</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4"><span className={`px-2.5 py-1 rounded-full text- font-medium ${p.role==="GM"? "bg-emerald-900 text-white" : "bg-emerald-100 text-emerald-800"}`}>{p.role}</span></td>
-                    <td className="py-3 px-4 text-right">
-                      {p.role==="CONSULTANT" ? (
-                        <button onClick={()=>openPwModal(p.id, p.email)} className="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-50">🔑 Ubah Password</button>
-                      ) : (
-                        <span className="text-xs text-zinc-400">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {profiles.length===0 && <tr><td colSpan={3} className="text-center text-zinc-400 py-8">Belum ada data konsultan</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         <div className="bg-white/90 backdrop-blur-xl rounded- border border-emerald-100 shadow-sm p-6">
           <div className="flex flex-col lg:flex-row justify-between gap-4 mb-6">
             <div className="flex gap-2">
@@ -297,34 +225,6 @@ export default function GMDashboard(){
               {detailData.length===0 && <p className="text-center text-zinc-400 py-10">Tidak ada data</p>}
             </div>
             <div className="p-6 border-t bg-zinc-50 flex gap-3"><button onClick={()=>setSelectedCard(null)} className="flex-1 border py-3 rounded-2xl text-sm">Tutup</button><button onClick={()=>setSelectedCard(null)} className="flex-1 bg-emerald-900 text-white py-3 rounded-2xl text-sm">Oke</button></div>
-          </div>
-        </div>
-      )}
-
-      {pwTarget && (
-        <div className="fixed inset-0 bg-emerald-950/40 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={closePwModal}>
-          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-emerald-100" onClick={e=>e.stopPropagation()}>
-            <div className="p-6 border-b border-emerald-50 bg-gradient-to-br from-emerald-50 to-green-50 flex justify-between items-start">
-              <div>
-                <h2 className="text-lg font-bold text-emerald-950">🔑 Ubah Password Konsultan</h2>
-                <p className="text-xs text-emerald-700/60 mt-1 break-all">{pwTarget.email}</p>
-              </div>
-              <button onClick={closePwModal} className="w-8 h-8 bg-white rounded-full flex items-center justify-center shadow shrink-0">✕</button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-emerald-800/70 mb-1.5">Password Baru (min. 6 karakter)</label>
-                <input type="password" value={pwValue} onChange={e=>setPwValue(e.target.value)} placeholder="••••••••" autoFocus className="w-full border border-emerald-100 rounded-2xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" onKeyDown={e=>{ if(e.key==="Enter" && !pwBusy) submitPassword(); }}/>
-              </div>
-              {pwMsg && (
-                <div className={`text-xs px-4 py-3 rounded-2xl ${pwMsg.ok? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-600 border border-red-200"}`}>{pwMsg.ok? "✓ " : "✕ "}{pwMsg.text}</div>
-              )}
-              <p className="text- text-zinc-400">Konsultan akan langsung bisa login dengan password baru ini.</p>
-            </div>
-            <div className="p-4 border-t bg-zinc-50 flex gap-3">
-              <button onClick={closePwModal} className="flex-1 border py-2.5 rounded-2xl text-sm">Batal</button>
-              <button onClick={submitPassword} disabled={pwBusy || pwValue.length<6} className="flex-1 bg-emerald-900 text-white py-2.5 rounded-2xl text-sm disabled:opacity-50">{pwBusy? "Menyimpan..." : "Simpan Password"}</button>
-            </div>
           </div>
         </div>
       )}
